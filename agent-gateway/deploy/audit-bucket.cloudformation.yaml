@@ -1,0 +1,151 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Immutable audit-log bucket for agent-gateway: S3 Object Lock (COMPLIANCE), versioning, KMS encryption,
+  TLS-only, and a bucket policy that no principal can use to delete audit objects or weaken retention.
+  Deploy into a SEPARATE AWS account from the gateway if you can. COMPLIANCE retention is irreversible:
+  trial with RetentionDays=1 in a throwaway stack first.
+
+Parameters:
+  BucketName:
+    Type: String
+    Description: Globally unique name for the audit bucket.
+  RetentionDays:
+    Type: Number
+    Default: 365
+    MinValue: 1
+    Description: Default COMPLIANCE retention. Objects cannot be deleted or shortened until it elapses.
+  GatewayRoleArn:
+    Type: String
+    Description: ARN of the IAM role the gateway runs as (the only principal allowed to write).
+
+Resources:
+  AuditKey:
+    Type: AWS::KMS::Key
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Description: Encrypts the agent-gateway audit bucket
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AccountAdministration
+            Effect: Allow
+            Principal:
+              AWS: !Sub "arn:${AWS::Partition}:iam::${AWS::AccountId}:root"
+            Action: "kms:*"
+            Resource: "*"
+
+  AuditBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Ref BucketName
+      ObjectLockEnabled: true
+      ObjectLockConfiguration:
+        ObjectLockEnabled: Enabled
+        Rule:
+          DefaultRetention:
+            Mode: COMPLIANCE
+            Days: !Ref RetentionDays
+      VersioningConfiguration:
+        Status: Enabled
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - BucketKeyEnabled: true
+            ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt AuditKey.Arn
+
+  AuditBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AuditBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TlsOnly
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt AuditBucket.Arn
+              - !Sub "${AuditBucket.Arn}/*"
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+          - Sid: NobodyDeletesOrWeakensAudit
+            Effect: Deny
+            Principal: "*"
+            Action:
+              - "s3:DeleteObject"
+              - "s3:DeleteObjectVersion"
+              - "s3:BypassGovernanceRetention"
+              - "s3:PutBucketObjectLockConfiguration"
+              - "s3:PutBucketVersioning"
+              - "s3:PutLifecycleConfiguration"
+            Resource:
+              - !GetAtt AuditBucket.Arn
+              - !Sub "${AuditBucket.Arn}/*"
+          - Sid: OnlyComplianceModeWrites
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${AuditBucket.Arn}/*"
+            Condition:
+              StringNotEquals:
+                "s3:object-lock-mode": COMPLIANCE
+          - Sid: OnlyGatewayRoleWrites
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:PutObject"
+            Resource: !Sub "${AuditBucket.Arn}/*"
+            Condition:
+              ArnNotEquals:
+                "aws:PrincipalArn": !Ref GatewayRoleArn
+
+  GatewayWritePolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: agent-gateway audit writer (no delete, no retention changes)
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: ["s3:PutObject", "s3:PutObjectRetention", "s3:GetObject", "s3:GetObjectVersion",
+                     "s3:ListBucket", "s3:GetBucketObjectLockConfiguration", "s3:GetBucketVersioning"]
+            Resource: [!GetAtt AuditBucket.Arn, !Sub "${AuditBucket.Arn}/audit/*"]
+          - Effect: Allow
+            Action: ["kms:GenerateDataKey", "kms:Decrypt"]
+            Resource: !GetAtt AuditKey.Arn
+
+  AuditorReadPolicy:
+    Type: AWS::IAM::ManagedPolicy
+    Properties:
+      Description: read-only access to the audit bucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action: ["s3:GetObject", "s3:GetObjectVersion", "s3:GetObjectRetention", "s3:ListBucket"]
+            Resource: [!GetAtt AuditBucket.Arn, !Sub "${AuditBucket.Arn}/audit/*"]
+          - Effect: Allow
+            Action: ["kms:Decrypt"]
+            Resource: !GetAtt AuditKey.Arn
+
+Outputs:
+  BucketName:
+    Value: !Ref AuditBucket
+  GatewayPolicyArn:
+    Value: !Ref GatewayWritePolicy
+  AuditorPolicyArn:
+    Value: !Ref AuditorReadPolicy

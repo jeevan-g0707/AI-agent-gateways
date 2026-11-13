@@ -1,0 +1,157 @@
+{
+  "version": "2026.11.05-1",
+  "approval": {
+    "cooldown_seconds": {
+      "medium": 0,
+      "high": 30,
+      "critical": 120
+    }
+  },
+  "egress_allowed_domains": [
+    "enterprise.com",
+    "partner.com"
+  ],
+  "data_labels": [
+    {
+      "pattern": "kb:public/*",
+      "label": "public"
+    },
+    {
+      "pattern": "file:/app/reports/*",
+      "label": "internal"
+    },
+    {
+      "pattern": "repo:*",
+      "label": "internal"
+    },
+    {
+      "pattern": "db:*",
+      "label": "confidential"
+    }
+  ],
+  "default_data_label": "internal",
+  "egress_clearance": {
+    "enterprise.com": "confidential",
+    "partner.com": "internal"
+  },
+  "default_egress_clearance": "public",
+  "trusted_destination_clearance": "internal",
+  "egress_limits": {
+    "max_messages_per_session": 5,
+    "max_bytes_per_message": 10000,
+    "max_bytes_per_session": 50000,
+    "max_new_destinations_per_session": 3,
+    "max_source_coverage_pct": 50,
+    "min_source_shingles": 5
+  },
+  "taint_policy": {
+    "low": "require_approval",
+    "medium": "require_approval",
+    "high": "deny",
+    "critical": "deny"
+  },
+  "capabilities": {
+    "docs:search": {
+      "risk": "low",
+      "resource_patterns": [
+        "kb:public/*"
+      ],
+      "rule_id": "R-LOW-001"
+    },
+    "files:read": {
+      "risk": "low",
+      "resource_patterns": [
+        "file:/app/reports/*"
+      ],
+      "rule_id": "R-LOW-002"
+    },
+    "github:pull_request:create": {
+      "risk": "medium",
+      "resource_patterns": [
+        "repo:org-enterprise/core-docs"
+      ],
+      "rule_id": "R-MED-001"
+    },
+    "tickets:update_status": {
+      "risk": "medium",
+      "resource_patterns": [
+        "ticket:DOC-*"
+      ],
+      "rule_id": "R-MED-002"
+    },
+    "shell:run_script": {
+      "risk": "high",
+      "resource_patterns": [
+        "script:/app/scripts/*"
+      ],
+      "rule_id": "R-HIGH-001"
+    },
+    "email:send_external": {
+      "risk": "high",
+      "resource_patterns": [
+        "mailbox:outbound-docs"
+      ],
+      "rule_id": "R-HIGH-002"
+    },
+    "files:write": {
+      "risk": "high",
+      "resource_patterns": [
+        "file:/app/output/*"
+      ],
+      "rule_id": "R-HIGH-003"
+    },
+    "db:drop_table": {
+      "risk": "critical",
+      "resource_patterns": [
+        "db:staging/*"
+      ],
+      "rule_id": "R-CRIT-001"
+    },
+    "payments:initiate": {
+      "risk": "critical",
+      "resource_patterns": [
+        "account:vendor-*"
+      ],
+      "rule_id": "R-CRIT-002"
+    },
+    "iam:modify_policy": {
+      "risk": "critical",
+      "resource_patterns": [
+        "policy:*"
+      ],
+      "rule_id": "R-CRIT-003"
+    }
+  },
+  "user_entitlements": {
+    "user:shyam@enterprise.com": [
+      "docs:search",
+      "files:read",
+      "github:pull_request:create",
+      "tickets:update_status",
+      "files:write",
+      "email:send_external"
+    ],
+    "user:admin@enterprise.com": [
+      "docs:search",
+      "files:read",
+      "github:pull_request:create",
+      "tickets:update_status",
+      "files:write",
+      "email:send_external",
+      "shell:run_script",
+      "db:drop_table",
+      "payments:initiate",
+      "iam:modify_policy"
+    ],
+    "user:intern@enterprise.com": [
+      "docs:search"
+    ]
+  },
+  "release_rules": {
+    "partner.com": [
+      "file:/app/reports/*",
+      "kb:public/*"
+    ]
+  },
+  "egress_dual_approval_label": "confidential"
+}
